@@ -8,6 +8,12 @@
     <name>jsonrpc Maven Webapp</name>
     <url>http://maven.apache.org</url>
     <properties>
+        <!--数据库迁移所用的参数 -->
+        <db.url>jdbc:mysql://127.0.0.1:3306</db.url>
+        <db.username>root</db.username>
+        <db.password></db.password>
+        <db.schema>base_jsonrpc</db.schema>
+
         <!--防止maven改动IDE的language level -->
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
@@ -20,8 +26,26 @@
         <spring-version>3.1.2.RELEASE</spring-version>
         <log4j-version>2.4.1</log4j-version>
         <slf4j-version>1.7.12</slf4j-version>
+        <solr-version>5.3.0</solr-version>
+        <mysql-version>5.1.40</mysql-version>
+        <jedis-version>2.9.0</jedis-version>
     </properties>
     <dependencies>
+        <!--MySQL JDBC driver, 数据库迁移等情况下需要. -->
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>${mysql-version}</version>
+        </dependency>
+        <!--redis客户端 -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>${jedis-version}</version>
+            <type>jar</type>
+            <scope>compile</scope>
+        </dependency>
+
         <!--如果不将该包导入, 编译会报错, 有人遇到了同样的问题. https://code.google.com/p/jsonrpc4j/issues/detail?id=21-->
         <dependency>
             <groupId>javax.portlet</groupId>
@@ -76,6 +100,18 @@
             <artifactId>jcl-over-slf4j</artifactId>
             <version>${slf4j-version}</version>
         </dependency>
+        <!--solr的java客户端-->
+        <dependency>
+            <groupId>org.apache.solr</groupId>
+            <artifactId>solr-solrj</artifactId>
+            <version>${solr-version}</version>
+        </dependency>
+        <!--C3PO-->
+        <dependency>
+            <groupId>c3p0</groupId>
+            <artifactId>c3p0</artifactId>
+            <version>0.9.1.2</version>
+        </dependency>
     </dependencies>
     <build>
         <finalName>jsonrpc</finalName>
@@ -88,6 +124,110 @@
                     <skip>false</skip>
                 </configuration>
             </plugin>
+            <!--数据库迁移, 同步的插件 -->
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>3.0</version>
+                <!-- Note that we're executing the Flyway plugin in the "generate-sources" phase -->
+                <executions>
+                    <execution>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>migrate</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <!-- Note that we need to prefix the db/migration path with filesystem:
+                to prevent Flyway from looking for our migration scripts only on the classpath -->
+                <configuration>
+                    <url>${db.url}</url>
+                    <user>${db.username}</user>
+                    <password>${db.password}</password>
+                    <encoding>${project.build.sourceEncoding}</encoding>
+                    <schemas>
+                        <schema>${db.schema}</schema>
+                    </schemas>
+                    <locations>
+                        <location>filesystem:src/main/resources/db/migration</location>
+                    </locations>
+                </configuration>
+            </plugin>
+
+            <!--数据库代码生成的插件 -->
+            <plugin>
+                <!-- Specify the maven code generator plugin -->
+                <groupId>org.jooq</groupId>
+                <artifactId>jooq-codegen-maven</artifactId>
+                <version>3.6.1</version>
+                <!-- The plugin should hook into the generate goal -->
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <!-- Specify the plugin configuration. The configuration format is the
+                same as for the standalone code generator -->
+                <configuration>
+                    <!-- JDBC connection parameters -->
+                    <jdbc>
+                        <driver>com.mysql.jdbc.Driver</driver>
+                        <url>${db.url}</url>
+                        <user>${db.username}</user>
+                        <password>${db.password}</password>
+                    </jdbc>
+                    <!-- Generator parameters -->
+                    <generator>
+                        <database>
+                            <name>org.jooq.util.mysql.MySQLDatabase</name>
+                            <includes>.*</includes>
+                            <inputSchema>${db.schema}</inputSchema>
+
+                            <!-- Associate data type rewrites with database columns -->
+                            <forcedTypes>
+                                <forcedType>
+                                    <!-- Specify any data type from org.jooq.impl.SQLDataType -->
+                                    <name>BOOLEAN</name>
+
+                                    <!-- Add a Java regular expression matching fully-qualified columns. Use the pipe to separate several expressions.
+
+                                         If provided, both "expressions" and "types" must match. -->
+                                    <expression>.*\.HANDMADE</expression>
+
+                                    <!-- Add a Java regular expression matching data types to be forced to have this type.
+
+                                         Data types may be reported by your database as:
+                                         - NUMBER              regexp suggestion: NUMBER
+                                         - NUMBER(5)           regexp suggestion: NUMBER\(5\)
+                                         - NUMBER(5, 2)        regexp suggestion: NUMBER\(5,\s*2\)
+                                         - any other form.
+
+                                         It is thus recommended to use defensive regexes for types.
+
+                                         If provided, both "expressions" and "types" must match. -->
+                                    <types>.*</types>
+                                </forcedType>
+                            </forcedTypes>
+                        </database>
+                        <target>
+                            <packageName>com.lhb.common.generated</packageName>
+                            <directory>src/main/java</directory>
+                        </target>
+                    </generator>
+                </configuration>
+            </plugin>
+            <!-- 打开注释 跳过测试
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-surefire-plugin</artifactId>
+                            <version>2.4.2</version>
+                            <configuration>
+                                <skipTests>true</skipTests>
+                            </configuration>
+                        </plugin>
+            -->
         </plugins>
     </build>
 </project>
